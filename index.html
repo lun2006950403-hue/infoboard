@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>高雄即時空氣品質看板</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: #f4f6f9;
+      color: #333;
+      padding: 20px;
+    }
+    .dashboard {
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+    header {
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 2px solid #e2e8f0;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    h1 { font-size: 1.8rem; color: #1a202c; }
+    .source-tag { font-size: 0.85rem; color: #718096; }
+    .source-tag a { color: #3182ce; text-decoration: none; }
+    .source-tag a:hover { text-decoration: underline; }
+
+    /* State Boxes */
+    .status-box {
+      padding: 24px;
+      text-align: center;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+      margin: 20px 0;
+    }
+    .hidden { display: none !important; }
+    .error-box { border-left: 4px solid #e53e3e; color: #c53030; }
+    .btn-retry {
+      margin-top: 12px;
+      padding: 8px 16px;
+      background: #e53e3e;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .btn-retry:hover { background: #c53030; }
+
+    /* Cards Grid */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 8px;
+      padding: 16px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+      transition: transform 0.2s ease;
+    }
+    .card:hover { transform: translateY(-2px); }
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .site-name { font-size: 1.2rem; font-weight: bold; }
+    .badge {
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: bold;
+      color: #fff;
+    }
+    .bg-good { background-color: #38a169; }
+    .bg-moderate { background-color: #d69e2e; }
+    .bg-bad { background-color: #e53e3e; }
+    .bg-unknown { background-color: #718096; }
+
+    .aqi-value {
+      font-size: 2.2rem;
+      font-weight: 800;
+      margin-bottom: 8px;
+      text-align: center;
+    }
+    .metrics {
+      font-size: 0.85rem;
+      color: #4a5568;
+      border-top: 1px solid #edf2f7;
+      padding-top: 8px;
+      display: flex;
+      justify-content: space-between;
+    }
+  </style>
+</head>
+<body>
+
+<div class="dashboard">
+  <header>
+    <div>
+      <h1>高雄空氣品質即時看板</h1>
+      <p class="source-tag">
+        資料來源：<a href="https://data.gov.tw/dataset/40507" target="_blank" rel="noopener">環境部空氣品質指標 (AQI) 開放資料</a>
+      </p>
+    </div>
+    <div id="update-time" class="source-tag">最後更新：載入中...</div>
+  </header>
+
+  <!-- 載入中提示 -->
+  <div id="loading" class="status-box">
+    <p>📡 正在連線至開放資料 API，讀取即時數據中...</p>
+  </div>
+
+  <!-- 錯誤提示 -->
+  <div id="error" class="status-box error-box hidden">
+    <p id="error-message">無法取得資料，請確認網路連線或稍後再試。</p>
+    <button class="btn-retry" onclick="fetchAirQualityData()">重新嘗試</button>
+  </div>
+
+  <!-- 資料展示區域 -->
+  <div id="card-container" class="grid hidden"></div>
+</div>
+
+<script>
+  // 環境部 AQI API (MOENV)
+  const API_URL = 'https://data.moenv.gov.tw/api/v2/aqx_p_432?language=zh&api_key=e88f191f-3ee5-458f-823e-114264ed7eb6';
+
+  async function fetchAirQualityData() {
+    const loadingEl = document.getElementById('loading');
+    const errorEl = document.getElementById('error');
+    const containerEl = document.getElementById('card-container');
+    const updateTimeEl = document.getElementById('update-time');
+
+    // 切換 UI 為載入狀態
+    loadingEl.classList.remove('hidden');
+    errorEl.classList.add('hidden');
+    containerEl.classList.add('hidden');
+
+    try {
+      const response = await fetch(API_URL);
+      if (!response.ok) {
+        throw new Error(`伺服器回應異常 (HTTP ${response.status})`);
+      }
+      
+      const data = await response.json();
+      
+      // 篩選高雄地區的測站數據
+      const khData = data.records.filter(item => item.county === '高雄市');
+
+      if (!khData || khData.length === 0) {
+        throw new Error('未取得高雄地區數據，請確認開放資料平台狀態。');
+      }
+
+      renderCards(khData);
+      
+      // 更新成功後顯示 UI
+      loadingEl.classList.add('hidden');
+      containerEl.classList.remove('hidden');
+      updateTimeEl.textContent = `最後更新：${khData[0].publishtime || new Date().toLocaleTimeString()}`;
+
+    } catch (err) {
+      console.error('Fetch Error:', err);
+      loadingEl.classList.add('hidden');
+      document.getElementById('error-message').textContent = `錯誤原因：${err.message || '來源服務暫時無法回應'}`;
+      errorEl.classList.remove('hidden');
+    }
+  }
+
+  function renderCards(records) {
+    const container = document.getElementById('card-container');
+    container.innerHTML = '';
+
+    records.forEach(item => {
+      const aqi = parseInt(item.aqi) || 0;
+      let statusClass = 'bg-good';
+      
+      if (aqi > 100) statusClass = 'bg-bad';
+      else if (aqi > 50) statusClass = 'bg-moderate';
+      else if (aqi === 0) statusClass = 'bg-unknown';
+
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML = `
+        <div class="card-header">
+          <span class="site-name">${item.sitename}</span>
+          <span class="badge ${statusClass}">${item.status || '未知'}</span>
+        </div>
+        <div class="aqi-value">${item.aqi || '--'}</div>
+        <div class="metrics">
+          <span>PM2.5: ${item['pm2.5'] || '--'} µg/m³</span>
+          <span>PM10: ${item.pm10 || '--'} µg/m³</span>
+        </div>
+      `;
+      container.appendChild(card);
+    });
+  }
+
+  // 初始化載入
+  fetchAirQualityData();
+</script>
+
+</body>
+</html>
